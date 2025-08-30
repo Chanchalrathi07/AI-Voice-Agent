@@ -1,3 +1,271 @@
+<!-- <!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <title>Conversational Voice Agent</title>
+  <style>
+    body {
+      font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+      max-width: 480px;
+      margin: 40px auto;
+      padding: 20px;
+      background: #f0f4ff;
+      border-radius: 8px;
+      box-shadow: 0 3px 15px rgba(0,0,0,0.1);
+      color: #2c3e50;
+      text-align: center;
+    }
+    h1 {
+      margin-bottom: 24px;
+      color: #334e68;
+    }
+    button {
+      width: 160px;
+      height: 50px;
+      margin: 10px 10px 20px 10px;
+      border: none;
+      border-radius: 8px;
+      font-size: 1rem;
+      cursor: pointer;
+      transition: background 0.3s ease;
+    }
+    #record-button {
+      background: #e74c3c;
+      color: white;
+      box-shadow: 0 0 10px #e74c3c;
+    }
+    #record-button.recording {
+      animation: pulse 1.2s infinite;
+      background: #c0392b;
+      box-shadow: 0 0 20px #c0392b;
+    }
+    #stream-button {
+      background: #2980b9;
+      color: white;
+      box-shadow: 0 0 10px #2980b9;
+    }
+    #stream-button:disabled {
+      background: #95b8d1;
+      cursor: not-allowed;
+      box-shadow: none;
+    }
+    #stop-stream-button {
+      background: #7f8c8d;
+      color: white;
+      box-shadow: 0 0 10px #7f8c8d;
+    }
+    #stop-stream-button:disabled {
+      background: #c1c7c9;
+      cursor: not-allowed;
+      box-shadow: none;
+    }
+    @keyframes pulse {
+      0%, 100% { box-shadow: 0 0 10px #c0392b; }
+      50% { box-shadow: 0 0 30px #e74c3c; }
+    }
+    #status {
+      font-size: 1rem;
+      margin-bottom: 20px;
+      min-height: 24px;
+      color: #2980b9;
+      font-weight: 600;
+    }
+    #conversation {
+      background: white;
+      border-radius: 8px;
+      padding: 15px 20px;
+      box-shadow: inset 0 0 5px rgba(0,0,0,0.1);
+      text-align: left;
+      min-height: 160px;
+      font-size: 1rem;
+      overflow-y: auto;
+    }
+    .message {
+      margin-bottom: 12px;
+    }
+    .user {
+      color: #27ae60;
+      font-weight: 600;
+    }
+    .assistant {
+      color: #34495e;
+      font-weight: 600;
+    }
+    audio {
+      display: none;
+    }
+  </style>
+</head>
+<body>
+
+  <h1>Voice Agent</h1>
+
+  <button id="record-button" aria-label="Start Recording">🎤 Record & Send Full Audio</button>
+  <button id="stream-button" aria-label="Start Streaming">🔴 Start Streaming</button>
+  <button id="stop-stream-button" aria-label="Stop Streaming" disabled>⏹ Stop Streaming</button>
+
+  <p id="status"></p>
+
+  <div id="conversation"></div>
+
+  <audio id="playback" autoplay></audio>
+
+  <script>
+    // Globals for full audio recording
+    const recordButton = document.getElementById("record-button");
+    const statusElem = document.getElementById("status");
+    const conversationElem = document.getElementById("conversation");
+    const playback = document.getElementById("playback");
+
+    let mediaRecorder; 
+    let recordedChunks = [];
+    let isRecording = false;
+
+    // Globals for streaming audio recording
+    const streamButton = document.getElementById("stream-button");
+    const stopStreamButton = document.getElementById("stop-stream-button");
+
+    let streamingRecorder;
+    let streaming = false;
+    const ws = new WebSocket("ws://localhost:8000/ws-audio");
+
+    ws.onopen = () => console.log("WebSocket open for audio streaming");
+    ws.onerror = error => console.error("WebSocket error:", error);
+    ws.onclose = () => console.log("WebSocket connection closed.");
+
+    // Full Audio Recording Functions
+    async function startRecording() {
+      recordedChunks = [];
+      try {
+        const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+        mediaRecorder = new MediaRecorder(stream);
+        mediaRecorder.start();
+        isRecording = true;
+        updateUI();
+
+        mediaRecorder.ondataavailable = e => {
+          if (e.data.size > 0) recordedChunks.push(e.data);
+        };
+
+        mediaRecorder.onstop = () => {
+          const blob = new Blob(recordedChunks, { type: "audio/webm" });
+          sendAudio(blob);
+          isRecording = false;
+          updateUI();
+        };
+      } catch (err) {
+        statusElem.textContent = "Microphone access denied or error.";
+      }
+    }
+
+    function stopRecording() {
+      if (mediaRecorder && isRecording) {
+        mediaRecorder.stop();
+      }
+    }
+
+    // Update UI
+    function updateUI() {
+      if (isRecording) {
+        recordButton.classList.add("recording");
+        recordButton.setAttribute("aria-label", "Stop Recording");
+        statusElem.textContent = "Recording...";
+      } else {
+        recordButton.classList.remove("recording");
+        recordButton.setAttribute("aria-label", "Start Recording");
+        statusElem.textContent = "";
+      }
+    }
+
+    recordButton.addEventListener("click", () => {
+      if (isRecording) {
+        stopRecording();
+      } else {
+        startRecording();
+      }
+    });
+
+    async function sendAudio(blob) {
+      statusElem.textContent = "Processing...";
+      const sessionId = new URLSearchParams(window.location.search).get("session_id") || Date.now().toString();
+      if (!window.location.search.includes("session_id")) {
+        window.history.replaceState(null, '', `?session_id=${sessionId}`);
+      }
+
+      const formData = new FormData();
+      formData.append("file", blob, `audio_${Date.now()}.webm`);
+
+      try {
+        const response = await fetch(`http://localhost:8000/agent/chat/${sessionId}`, {
+          method: "POST",
+          body: formData
+        });
+        const data = await response.json();
+
+        if (!response.ok) {
+          statusElem.textContent = "Error from server: " + (data.detail || response.statusText);
+          return;
+        }
+
+        addMessage("You", data.transcript, "user");
+        addMessage("Assistant", data.llm_response, "assistant");
+
+        if (data.audio_url) {
+          playback.src = data.audio_url;
+          playback.play();
+        }
+
+        statusElem.textContent = "";
+
+      } catch (err) {
+        statusElem.textContent = "Failed to connect to server.";
+      }
+    }
+
+    function addMessage(speaker, text, cls) {
+      const msgElem = document.createElement("div");
+      msgElem.className = "message " + cls;
+      msgElem.textContent = `${speaker}: ${text}`;
+      conversationElem.appendChild(msgElem);
+      conversationElem.scrollTop = conversationElem.scrollHeight;
+    }
+
+    // Streaming Audio Recording
+    function startStreaming() {
+      navigator.mediaDevices.getUserMedia({ audio: true }).then(stream => {
+        streamingRecorder = new MediaRecorder(stream);
+        streamingRecorder.ondataavailable = event => {
+          if (event.data.size > 0 && streaming) {
+            ws.send(event.data);
+          }
+        };
+        streaming = true;
+        streamingRecorder.start(250);
+
+        streamButton.disabled = true;
+        stopStreamButton.disabled = false;
+        statusElem.textContent = "Streaming audio...";
+      }).catch(err => {
+        statusElem.textContent = "Microphone access denied or error.";
+      });
+    }
+
+    function stopStreaming() {
+      streaming = false;
+      if (streamingRecorder && streamingRecorder.state !== "inactive") {
+        streamingRecorder.stop();
+      }
+      streamButton.disabled = false;
+      stopStreamButton.disabled = true;
+      statusElem.textContent = "";
+    }
+
+    streamButton.addEventListener("click", () => startStreaming());
+    stopStreamButton.addEventListener("click", () => stopStreaming());
+  </script>
+
+</body>
+</html> -->
 <!DOCTYPE html>
 <html lang="en">
 <head>
@@ -6,86 +274,279 @@
   <style>
     body {
       font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
-      max-width: 480px; margin: 40px auto; padding: 20px;
-      background: #f0f4ff; border-radius: 8px;
+      max-width: 480px;
+      margin: 40px auto;
+      padding: 20px;
+      background: #f0f4ff;
+      border-radius: 8px;
       box-shadow: 0 3px 15px rgba(0,0,0,0.1);
-      color: #2c3e50; text-align: center;
+      color: #2c3e50;
+      text-align: center;
     }
-    h1 { margin-bottom: 24px; color: #334e68; }
+    h1 {
+      margin-bottom: 24px;
+      color: #334e68;
+    }
+    button {
+      width: 160px;
+      height: 50px;
+      margin: 10px 10px 20px 10px;
+      border: none;
+      border-radius: 8px;
+      font-size: 1rem;
+      cursor: pointer;
+      transition: background 0.3s ease;
+    }
     #record-button {
-      width: 80px; height: 80px; border: none; border-radius: 50%;
-      background: #e74c3c; box-shadow: 0 0 10px #e74c3c;
-      cursor: pointer; outline: none; transition: .3s; margin: 0 auto 20px;
+      background: #e74c3c;
+      color: white;
+      box-shadow: 0 0 10px #e74c3c;
     }
-    #record-button.recording { animation: pulse 1.2s infinite; background: #c0392b; box-shadow: 0 0 20px #c0392b; }
-    @keyframes pulse { 0%,100%{box-shadow:0 0 10px #c0392b;} 50%{box-shadow:0 0 30px #e74c3c;} }
-    #status { font-size: 1rem; margin-bottom: 20px; min-height: 24px; color:#2980b9; font-weight:600; }
-    #conversation { background: #fff; border-radius: 8px; padding: 15px 20px; box-shadow: inset 0 0 5px rgba(0,0,0,0.1); text-align: left; min-height: 160px; font-size: 1rem; overflow-y: auto; }
-    .message { margin-bottom: 12px; }
-    .user { color:#27ae60; font-weight:600; }
-    .assistant { color:#34495e; font-weight:600; }
-    audio { display: none; }
+    #record-button.recording {
+      animation: pulse 1.2s infinite;
+      background: #c0392b;
+      box-shadow: 0 0 20px #c0392b;
+    }
+    #stream-button {
+      background: #2980b9;
+      color: white;
+      box-shadow: 0 0 10px #2980b9;
+    }
+    #stream-button:disabled {
+      background: #95b8d1;
+      cursor: not-allowed;
+      box-shadow: none;
+    }
+    #stop-stream-button {
+      background: #7f8c8d;
+      color: white;
+      box-shadow: 0 0 10px #7f8c8d;
+    }
+    #stop-stream-button:disabled {
+      background: #c1c7c9;
+      cursor: not-allowed;
+      box-shadow: none;
+    }
+    @keyframes pulse {
+      0%, 100% { box-shadow: 0 0 10px #c0392b; }
+      50% { box-shadow: 0 0 30px #e74c3c; }
+    }
+    #status {
+      font-size: 1rem;
+      margin-bottom: 20px;
+      min-height: 24px;
+      color: #2980b9;
+      font-weight: 600;
+    }
+    #conversation {
+      background: white;
+      border-radius: 8px;
+      padding: 15px 20px;
+      box-shadow: inset 0 0 5px rgba(0,0,0,0.1);
+      text-align: left;
+      min-height: 160px;
+      font-size: 1rem;
+      overflow-y: auto;
+    }
+    .message {
+      margin-bottom: 12px;
+    }
+    .user {
+      color: #27ae60;
+      font-weight: 600;
+    }
+    .assistant {
+      color: #34495e;
+      font-weight: 600;
+    }
+    .partial {
+      color: #f39c12;
+      font-style: italic;
+    }
+    audio {
+      display: none;
+    }
   </style>
 </head>
 <body>
 
   <h1>Voice Agent</h1>
-  <button id="record-button" aria-label="Start Recording">🎤</button>
+
+  <button id="record-button" aria-label="Start Recording">🎤 Record & Send Full Audio</button>
+  <button id="stream-button" aria-label="Start Streaming">🔴 Start Streaming</button>
+  <button id="stop-stream-button" aria-label="Stop Streaming" disabled>⏹ Stop Streaming</button>
+
   <p id="status"></p>
+
   <div id="conversation"></div>
+
   <audio id="playback" autoplay></audio>
 
   <script>
-    const API_BASE_URL = "http://localhost:8000";
-
     const recordButton = document.getElementById("record-button");
+    const streamButton = document.getElementById("stream-button");
+    const stopStreamButton = document.getElementById("stop-stream-button");
     const statusElem = document.getElementById("status");
     const conversationElem = document.getElementById("conversation");
     const playback = document.getElementById("playback");
 
-    let mediaRecorder; let recordedChunks = []; let isRecording = false;
+    let mediaRecorder; 
+    let recordedChunks = [];
+    let isRecording = false;
+    let streamingRecorder;
+    let streaming = false;
+    let ws;
 
+    // --- FULL AUDIO RECORDING ---
     async function startRecording() {
       recordedChunks = [];
       try {
         const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
         mediaRecorder = new MediaRecorder(stream);
-        mediaRecorder.start(); isRecording = true; updateUI();
-        mediaRecorder.ondataavailable = e => { if (e.data.size > 0) recordedChunks.push(e.data); };
+        mediaRecorder.start();
+        isRecording = true;
+        updateUI();
+
+        mediaRecorder.ondataavailable = e => {
+          if (e.data.size > 0) recordedChunks.push(e.data);
+        };
+
         mediaRecorder.onstop = () => {
           const blob = new Blob(recordedChunks, { type: "audio/webm" });
-          sendAudio(blob); isRecording = false; updateUI();
+          sendAudio(blob);
+          isRecording = false;
+          updateUI();
         };
-      } catch {
-        statusElem.textContent = "Microphone access denied or error.";
+      } catch (err) {
+        statusElem.textContent = "🎙️ Microphone access denied or error.";
       }
     }
-    function stopRecording(){ if (mediaRecorder && isRecording) mediaRecorder.stop(); }
-    function updateUI(){
-      if (isRecording){ recordButton.classList.add("recording"); statusElem.textContent = "Recording..."; recordButton.setAttribute("aria-label","Stop Recording"); }
-      else { recordButton.classList.remove("recording"); if (!statusElem.textContent.includes("Processing")) statusElem.textContent = ""; recordButton.setAttribute("aria-label","Start Recording"); }
-    }
-    recordButton.addEventListener("click", () => isRecording ? stopRecording() : startRecording());
 
-    async function sendAudio(blob){
+    function stopRecording() {
+      if (mediaRecorder && isRecording) {
+        mediaRecorder.stop();
+      }
+    }
+
+    function updateUI() {
+      if (isRecording) {
+        recordButton.classList.add("recording");
+        recordButton.setAttribute("aria-label", "Stop Recording");
+        statusElem.textContent = "Recording...";
+      } else {
+        recordButton.classList.remove("recording");
+        recordButton.setAttribute("aria-label", "Start Recording");
+        statusElem.textContent = "";
+      }
+    }
+
+    recordButton.addEventListener("click", () => {
+      if (isRecording) stopRecording();
+      else startRecording();
+    });
+
+    async function sendAudio(blob) {
       statusElem.textContent = "Processing...";
       const sessionId = new URLSearchParams(window.location.search).get("session_id") || Date.now().toString();
-      if (!window.location.search.includes("session_id")) window.history.replaceState(null,'',`?session_id=${sessionId}`);
-      const formData = new FormData(); formData.append("file", blob, `audio_${Date.now()}.webm`);
+      if (!window.location.search.includes("session_id")) {
+        window.history.replaceState(null, '', `?session_id=${sessionId}`);
+      }
+
+      const formData = new FormData();
+      formData.append("file", blob, `audio_${Date.now()}.webm`);
+
       try {
-        const res = await fetch(`${API_BASE_URL}/agent/chat/${sessionId}`, { method:"POST", body: formData });
-        const data = await res.json();
-        if (!res.ok) { statusElem.textContent = "Error: " + (data.detail || res.statusText); return; }
+        const response = await fetch(`http://localhost:8000/agent/chat/${sessionId}`, {
+          method: "POST",
+          body: formData
+        });
+        const data = await response.json();
+
+        if (!response.ok) {
+          statusElem.textContent = "Error from server: " + (data.detail || response.statusText);
+          return;
+        }
+
         addMessage("You", data.transcript, "user");
         addMessage("Assistant", data.llm_response, "assistant");
-        if (data.audio_url){ playback.src = data.audio_url; playback.play(); }
+
+        if (data.audio_url) {
+          playback.src = data.audio_url;
+          playback.play();
+        }
+
         statusElem.textContent = "";
-      } catch { statusElem.textContent = "Failed to connect to server."; }
+
+      } catch (err) {
+        statusElem.textContent = "Failed to connect to server.";
+      }
     }
-    function addMessage(speaker, text, cls){
-      const d = document.createElement("div"); d.className = `message ${cls}`; d.textContent = `${speaker}: ${text}`;
-      conversationElem.appendChild(d); conversationElem.scrollTop = conversationElem.scrollHeight;
+
+    function addMessage(speaker, text, cls) {
+      const msgElem = document.createElement("div");
+      msgElem.className = "message " + cls;
+      msgElem.textContent = `${speaker}: ${text}`;
+      conversationElem.appendChild(msgElem);
+      conversationElem.scrollTop = conversationElem.scrollHeight;
     }
+
+    // --- STREAMING AUDIO ---
+    function startStreaming() {
+      ws = new WebSocket("ws://localhost:8000/ws-audio");
+
+      ws.onopen = () => {
+        statusElem.textContent = "Streaming audio...";
+        navigator.mediaDevices.getUserMedia({ audio: true }).then(stream => {
+          streamingRecorder = new MediaRecorder(stream);
+          streamingRecorder.ondataavailable = event => {
+            if (event.data.size > 0 && streaming) {
+              ws.send(event.data);
+            }
+          };
+          streaming = true;
+          streamingRecorder.start(250);
+
+          streamButton.disabled = true;
+          stopStreamButton.disabled = false;
+        });
+      };
+
+      ws.onmessage = event => {
+        const text = event.data;
+        if (text.startsWith("Final:")) {
+          addMessage("You (final)", text.replace("Final:", "").trim(), "user");
+        } else {
+          addMessage("You (partial)", text.replace("Partial:", "").trim(), "partial");
+        }
+      };
+
+      ws.onerror = error => {
+        console.error("WebSocket error:", error);
+        statusElem.textContent = "WebSocket error!";
+      };
+
+      ws.onclose = () => {
+        console.log("WebSocket closed.");
+        statusElem.textContent = "";
+      };
+    }
+
+    function stopStreaming() {
+      streaming = false;
+      if (streamingRecorder && streamingRecorder.state !== "inactive") {
+        streamingRecorder.stop();
+      }
+      if (ws && ws.readyState === WebSocket.OPEN) {
+        ws.close();
+      }
+      streamButton.disabled = false;
+      stopStreamButton.disabled = true;
+      statusElem.textContent = "";
+    }
+
+    streamButton.addEventListener("click", () => startStreaming());
+    stopStreamButton.addEventListener("click", () => stopStreaming());
   </script>
+
 </body>
 </html>
