@@ -68,7 +68,7 @@
 Beautiful glassmorphism design with real-time voice controls
 
 ### 🔧 *Configuration Panel*  
-![Configuration](screenshots/UI.png)
+![Configuration](screenshots/ui.png)
 Easy API key management with real-time validation
 
 ### 📊 *Diagram Generation*
