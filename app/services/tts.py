@@ -1,36 +1,41 @@
-import requests
-import os
+# app/services/tts.py
 import logging
+import requests
+import config
 
-MURF_BASE_URL = os.getenv("MURF_BASE_URL")
-MURF_API_KEY = os.getenv("MURF_API_KEY")
+logger = logging.getLogger("app.services.tts")
 
-logger = logging.getLogger(__name__)
+MURF_API_URL = "https://api.murf.ai/v1/speech/generate"
 
-class TTSService:
-    @staticmethod
-    def generate_speech(text: str) -> str:
-        logger.info("Requesting Murf TTS API")
-        headers = {
-            "api-key": MURF_API_KEY,
-            "Content-Type": "application/json",
-        }
-        payload = {
-            "text": text,
-            "voiceId": "en-US-natalie",
-            "format": "MP3",
-            "sampleRate": 44100,
-            "model": "GEN2"
-        }
+def speak(text: str, voice_id: str = "en-US-natalie", format: str = "MP3"):
+    """
+    Wrapper to synthesize speech using Murf API.
+    Returns audio bytes or None.
+    """
+    headers = {
+        "api-key": config.MURF_API_KEY,
+        "Content-Type": "application/json"
+    }
+    payload = {
+        "voiceId": voice_id,
+        "text": text,
+        "format": format
+    }
 
-        response = requests.post(f"{MURF_BASE_URL}/v1/speech/generate", headers=headers, json=payload)
-        if response.status_code != 200:
-            logger.error(f"Murf API error: {response.text}")
-            raise RuntimeError(f"Murf API error: {response.text}")
+    try:
+        response = requests.post(MURF_API_URL, json=payload, headers=headers)
+        response.raise_for_status()
+        data = response.json()
 
-        audio_file_url = response.json().get("audioFile")
-        if not audio_file_url:
-            logger.error("No audio URL received from Murf")
-            raise RuntimeError("No audio URL received from Murf")
+        audio_url = data.get("audioFile")
+        if not audio_url:
+            logger.error("Murf response missing audioFile: %s", data)
+            return None
 
-        return audio_file_url
+        audio_response = requests.get(audio_url)
+        audio_response.raise_for_status()
+        return audio_response.content
+
+    except Exception as e:
+        logger.error("TTS error: %s", e)
+        return None

@@ -1,438 +1,363 @@
 
-# import shutil
-# import os
-# import asyncio
-# import logging
-# from fastapi import FastAPI, WebSocket, WebSocketDisconnect
-# import assemblyai as aai
-# from dotenv import load_dotenv
-# load_dotenv()
-# aai.settings.api_key = os.getenv("ASSEMBLYAI_API_KEY")
-
-
-# from fastapi import FastAPI, UploadFile, File, HTTPException, WebSocket, WebSocketDisconnect
-# from fastapi.middleware.cors import CORSMiddleware
-# from fastapi.responses import JSONResponse
-
-# from app.schemas import ChatRequestResponse, ChatMessage, LLMQueryResponse
-# from app.services import stt, llm, tts
-
-# logger = logging.getLogger("uvicorn.error")
-
-# app = FastAPI(title="AI Voice Agent API")
-
-# app.add_middleware(
-#     CORSMiddleware,
-#     allow_origins=["*"],
-#     allow_credentials=True,
-#     allow_methods=["*"],
-#     allow_headers=["*"],
-# )
-
-# # In-memory chat session store
-# chat_sessions = {}
-
-# FALLBACK_TEXT = "I'm having trouble connecting right now, please try again."
-
-
-# @app.post("/agent/chat/{session_id}", response_model=ChatRequestResponse)
-# async def agent_chat(session_id: str, file: UploadFile = File(...)):
-#     if session_id not in chat_sessions:
-#         chat_sessions[session_id] = []
-
-#     # Save audio temporarily
-#     temp_file_path = f"temp_{file.filename}"
-#     audio_bytes = await file.read()
-#     with open(temp_file_path, "wb") as f:
-#         f.write(audio_bytes)
-
-#     try:
-#         # STT
-#         user_text = stt.STTService.transcribe_audio(temp_file_path)
-#     except Exception as e:
-#         logger.error(f"STT failure: {e}")
-#         return await generate_fallback(session_id, "[STT failed]")
-
-#     chat_sessions[session_id].append(ChatMessage(role="user", content=user_text))
-
-#     # Build conversation prompt
-#     conversation_prompt = "\n".join([f"{m.role.capitalize()}: {m.content}" for m in chat_sessions[session_id]])
-
-#     try:
-#         # LLM
-#         assistant_text = llm.LLMService.generate_response(conversation_prompt)
-#     except Exception as e:
-#         logger.error(f"LLM failure: {e}")
-#         return await generate_fallback(session_id, user_text)
-
-#     chat_sessions[session_id].append(ChatMessage(role="assistant", content=assistant_text))
-
-#     try:
-#         # TTS
-#         audio_url = tts.TTSService.generate_speech(assistant_text)
-#     except Exception as e:
-#         logger.error(f"TTS failure: {e}")
-#         return await generate_fallback(session_id, user_text)
-
-#     # Clean up temp file
-#     os.remove(temp_file_path)
-
-#     return ChatRequestResponse(
-#         audio_url=audio_url,
-#         transcript=user_text,
-#         llm_response=assistant_text,
-#         history=chat_sessions[session_id]
-#     )
-
-
-# @app.post("/llm/query", response_model=LLMQueryResponse)
-# async def llm_query(file: UploadFile = File(...)):
-#     temp_file_path = f"temp_{file.filename}"
-#     audio_bytes = await file.read()
-#     with open(temp_file_path, "wb") as f:
-#         f.write(audio_bytes)
-
-#     try:
-#         prompt = stt.STTService.transcribe_audio(temp_file_path)
-#     except Exception as e:
-#         logger.error(f"STT failure: {e}")
-#         audio_url = tts.TTSService.generate_speech(FALLBACK_TEXT)
-#         return LLMQueryResponse(audio_url=audio_url, transcript="[STT failed]", llm_response=FALLBACK_TEXT)
-
-#     try:
-#         reply = llm.LLMService.generate_response(prompt)
-#     except Exception as e:
-#         logger.error(f"LLM failure: {e}")
-#         audio_url = tts.TTSService.generate_speech(FALLBACK_TEXT)
-#         return LLMQueryResponse(audio_url=audio_url, transcript=prompt, llm_response=FALLBACK_TEXT)
-
-#     try:
-#         audio_url = tts.TTSService.generate_speech(reply)
-#     except Exception as e:
-#         logger.error(f"TTS failure: {e}")
-#         audio_url = tts.TTSService.generate_speech(FALLBACK_TEXT)
-#         reply = FALLBACK_TEXT
-
-#     os.remove(temp_file_path)
-
-#     return LLMQueryResponse(audio_url=audio_url, transcript=prompt, llm_response=reply)
-
-
-# async def generate_fallback(session_id: str, user_text: str):
-#     logger.warning(f"Generating fallback for session {session_id}")
-#     try:
-#         audio_url = tts.TTSService.generate_speech(FALLBACK_TEXT)
-#     except Exception as e:
-#         logger.error(f"Fallback TTS failure: {e}")
-#         audio_url = ""
-
-#     return JSONResponse(content={
-#         "audio_url": audio_url,
-#         "transcript": user_text,
-#         "llm_response": FALLBACK_TEXT,
-#         "history": chat_sessions.get(session_id, [])
-#     })
-
-
-
-# @app.websocket("/ws")
-# async def websocket_endpoint(websocket: WebSocket):
-#     await websocket.accept()
-#     try:
-#         while True:
-#             data = await websocket.receive_text()
-#             print(f"Received message: {data}")
-#             await websocket.send_text(f"Echo: {data}")
-#     except WebSocketDisconnect:
-#         print("Client disconnected")
-
-# # import datetime
-# # @app.websocket("/ws-audio")
-# # async def websocket_audio_endpoint(websocket: WebSocket):
-# #     await websocket.accept()
-# #     # Generate a filename using timestamp
-# #     filename = f"audio_stream_{datetime.datetime.now().strftime('%Y%m%d_%H%M%S')}.webm"
-# #     with open(filename, "wb") as audio_file:
-# #         print(f"Saving audio to: {filename}")
-# #         try:
-# #             while True:
-# #                 data = await websocket.receive_bytes()
-# #                 audio_file.write(data)
-# #         except Exception as e:
-# #             print(f"WebSocket error: {e}")
-# #         finally:
-# #             print(f"Audio stream saved to: {filename}")
-            
-
-# # def on_data(transcript: aai.RealtimeTranscript):
-# #     if not transcript.text:
-# #         return
-# #     if isinstance(transcript, aai.RealtimeFinalTranscript):
-# #         print("Final:", transcript.text)
-# #     else:
-# #         print("Partial:", transcript.text)
-
-# # def on_error(err):
-# #     print("Error:", err)
-
-# # @app.websocket("/ws-audio")
-# # async def websocket_audio_endpoint(websocket: WebSocket):
-# #     await websocket.accept()
-
-# #     # AssemblyAI realtime client start
-# #     rt = aai.RealtimeTranscriber(
-# #         sample_rate=16000,   # audio format
-# #         on_data=on_data,
-# #         on_error=on_error,
-# #     )
-# #     rt.connect()
-
-# #     try:
-# #         while True:
-# #             # Client se audio bytes aayenge
-# #             data = await websocket.receive_bytes()
-# #             rt.stream(data)   # AssemblyAI ko bhej do
-
-# #     except Exception as e:
-# #         print(f"WebSocket error: {e}")
-# #     finally:
-# #         rt.close()
-# #         print("Audio stream ended")
-# @app.websocket("/ws-audio")
-# async def websocket_audio_endpoint(websocket: WebSocket):
-#     await websocket.accept()
-
-#     # Callback jab transcript aaye
-#     def on_data(transcript: aai.RealtimeTranscript):
-#         if isinstance(transcript, aai.RealtimeFinalTranscript):
-#             print("✅ Final:", transcript.text)
-#             # Agar UI ko bhejna ho toh:
-#             asyncio.create_task(websocket.send_text(f"Final: {transcript.text}"))
-#         else:
-#             print("📝 Partial:", transcript.text)
-
-#     def on_error(err: Exception):
-#         print("❌ Error:", err)
-
-#     # AssemblyAI realtime transcriber start
-#     rt = aai.RealtimeTranscriber(
-#         sample_rate=16000,  # PCM 16kHz mono
-#         on_data=on_data,
-#         on_error=on_error,
-#     )
-#     rt.connect()
-
-#     try:
-#         while True:
-#             # Client se audio bytes receive karo
-#             data = await websocket.receive_bytes()
-#             rt.stream(data)  # AssemblyAI ko bhejo
-#     except WebSocketDisconnect:
-#         print("🔌 Client disconnected")
-#     finally:
-#         rt.close()
-#         print("🛑 Audio stream ended")
-import os
-import asyncio
+from pathlib import Path
+from fastapi import FastAPI, Request, WebSocket, WebSocketDisconnect
+from fastapi.staticfiles import StaticFiles
+from fastapi.templating import Jinja2Templates
 import logging
-from dotenv import load_dotenv
+import asyncio
+import base64
+import re
+import inspect
+import json
+from typing import Dict, Any, Optional
+import time
+import uuid
 
-from fastapi import FastAPI, UploadFile, File, WebSocket, WebSocketDisconnect
-from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import JSONResponse
+# Import original services with fallback
+try:
+    from app.services import stt, llm, tts
+    from app.services.agent import agent_response
+except ImportError as e:
+    logging.warning(f"Import warning: {e}")
+    # We'll handle this in the websocket endpoint
 
-import assemblyai as aai
+try:
+    from app.services.memory import MemoryManager
 
-# ---- your existing imports for non-stream paths ----
-from app.schemas import ChatRequestResponse, ChatMessage, LLMQueryResponse
-from app.services import stt, llm, tts
+    memory_manager = MemoryManager()
+except ImportError:
+    logging.warning("Memory manager not available")
+    memory_manager = None
 
-# ---------- Setup ----------
-load_dotenv()
-aai.settings.api_key = os.getenv("ASSEMBLYAI_API_KEY")
-
-logger = logging.getLogger("uvicorn.error")
-
-app = FastAPI(title="AI Voice Agent API")
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=["*"],
-    allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
+# Configure logging
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s - %(name)s - %(levelname)s - %(message)s"
 )
+logger = logging.getLogger("voice-agent-pro")
 
-# In-memory chat session store
-chat_sessions = {}
-FALLBACK_TEXT = "I'm having trouble connecting right now, please try again."
+app = FastAPI(title="AI Voice Agent Pro", version="2.0.0")
 
-# ---------- Non-streaming endpoints (as-is) ----------
-@app.post("/agent/chat/{session_id}", response_model=ChatRequestResponse)
-async def agent_chat(session_id: str, file: UploadFile = File(...)):
-    if session_id not in chat_sessions:
-        chat_sessions[session_id] = []
+# Mount static files
+BASE_DIR = Path(__file__).resolve().parent.parent
+templates = Jinja2Templates(directory=BASE_DIR / "templates")
+app.mount("/static", StaticFiles(directory=BASE_DIR / "static"), name="static")
 
-    temp_file_path = f"temp_{file.filename}"
-    audio_bytes = await file.read()
-    with open(temp_file_path, "wb") as f:
-        f.write(audio_bytes)
-
-    try:
-        user_text = stt.STTService.transcribe_audio(temp_file_path)
-    except Exception as e:
-        logger.error(f"STT failure: {e}")
-        return await generate_fallback(session_id, "[STT failed]")
-
-    chat_sessions[session_id].append(ChatMessage(role="user", content=user_text))
-    conversation_prompt = "\n".join([f"{m.role.capitalize()}: {m.content}" for m in chat_sessions[session_id]])
-
-    try:
-        assistant_text = llm.LLMService.generate_response(conversation_prompt)
-    except Exception as e:
-        logger.error(f"LLM failure: {e}")
-        return await generate_fallback(session_id, user_text)
-
-    chat_sessions[session_id].append(ChatMessage(role="assistant", content=assistant_text))
-
-    try:
-        audio_url = tts.TTSService.generate_speech(assistant_text)
-    except Exception as e:
-        logger.error(f"TTS failure: {e}")
-        return await generate_fallback(session_id, user_text)
-
-    os.remove(temp_file_path)
-    return ChatRequestResponse(
-        audio_url=audio_url,
-        transcript=user_text,
-        llm_response=assistant_text,
-        history=chat_sessions[session_id]
-    )
+# Session storage
+active_sessions: Dict[str, Dict[str, Any]] = {}
 
 
-@app.post("/llm/query", response_model=LLMQueryResponse)
-async def llm_query(file: UploadFile = File(...)):
-    temp_file_path = f"temp_{file.filename}"
-    audio_bytes = await file.read()
-    with open(temp_file_path, "wb") as f:
-        f.write(audio_bytes)
-
-    try:
-        prompt = stt.STTService.transcribe_audio(temp_file_path)
-    except Exception as e:
-        logger.error(f"STT failure: {e}")
-        audio_url = tts.TTSService.generate_speech(FALLBACK_TEXT)
-        return LLMQueryResponse(audio_url=audio_url, transcript="[STT failed]", llm_response=FALLBACK_TEXT)
-
-    try:
-        reply = llm.LLMService.generate_response(prompt)
-    except Exception as e:
-        logger.error(f"LLM failure: {e}")
-        audio_url = tts.TTSService.generate_speech(FALLBACK_TEXT)
-        return LLMQueryResponse(audio_url=audio_url, transcript=prompt, llm_response=FALLBACK_TEXT)
-
-    try:
-        audio_url = tts.TTSService.generate_speech(reply)
-    except Exception as e:
-        logger.error(f"TTS failure: {e}")
-        audio_url = tts.TTSService.generate_speech(FALLBACK_TEXT)
-        reply = FALLBACK_TEXT
-
-    os.remove(temp_file_path)
-    return LLMQueryResponse(audio_url=audio_url, transcript=prompt, llm_response=reply)
+@app.get("/")
+async def home(request: Request):
+    """Serves the enhanced main HTML page."""
+    return templates.TemplateResponse("index.html", {"request": request})
 
 
-async def generate_fallback(session_id: str, user_text: str):
-    logger.warning(f"Generating fallback for session {session_id}")
-    try:
-        audio_url = tts.TTSService.generate_speech(FALLBACK_TEXT)
-    except Exception as e:
-        logger.error(f"Fallback TTS failure: {e}")
-        audio_url = ""
+@app.get("/health")
+async def health_check():
+    """Health check endpoint."""
+    return {
+        "status": "healthy",
+        "timestamp": time.time(),
+        "version": "2.0.0",
+        "active_sessions": len(active_sessions)
+    }
 
-    return JSONResponse(content={
-        "audio_url": audio_url,
-        "transcript": user_text,
-        "llm_response": FALLBACK_TEXT,
-        "history": chat_sessions.get(session_id, [])
-    })
+
+class SimpleWebSocketManager:
+    """Simplified WebSocket manager."""
+
+    def __init__(self):
+        self.connections: Dict[str, WebSocket] = {}
+        self.session_data: Dict[str, Dict] = {}
+
+    async def connect(self, websocket: WebSocket, session_id: str):
+        await websocket.accept()
+        self.connections[session_id] = websocket
+        self.session_data[session_id] = {
+            "connected_at": time.time(),
+            "message_count": 0,
+            "chat_history": [],
+            "api_keys": {},
+            "settings": {
+                "voice": "en-US-natalie",
+                "speech_rate": 1.0
+            },
+            "transcriber": None
+        }
+        logger.info(f"WebSocket session {session_id} connected")
+
+    async def disconnect(self, session_id: str):
+        if session_id in self.connections:
+            # Cleanup transcriber
+            session = self.session_data.get(session_id)
+            if session and session.get("transcriber"):
+                transcriber = session["transcriber"]
+                try:
+                    if hasattr(transcriber, "close"):
+                        close_method = getattr(transcriber, "close")
+                        if callable(close_method):
+                            if inspect.iscoroutinefunction(close_method):
+                                await close_method()
+                            else:
+                                close_method()
+                except Exception as e:
+                    logger.warning(f"Error closing transcriber: {e}")
+
+            del self.connections[session_id]
+            if session_id in self.session_data:
+                del self.session_data[session_id]
+            logger.info(f"WebSocket session {session_id} disconnected")
+
+    async def send_message(self, session_id: str, message: dict):
+        if session_id in self.connections:
+            try:
+                await self.connections[session_id].send_json(message)
+            except Exception as e:
+                logger.error(f"Error sending message to {session_id}: {e}")
+                await self.disconnect(session_id)
+
+    def get_session(self, session_id: str) -> Dict:
+        return self.session_data.get(session_id, {})
+
+    def update_session(self, session_id: str, updates: Dict):
+        if session_id in self.session_data:
+            self.session_data[session_id].update(updates)
+
+
+# Initialize WebSocket manager
+ws_manager = SimpleWebSocketManager()
 
 
 @app.websocket("/ws")
-async def websocket_plain_echo(websocket: WebSocket):
-    await websocket.accept()
+async def websocket_endpoint(websocket: WebSocket):
+    """Enhanced WebSocket endpoint with configuration support."""
+
+    session_id = f"session_{uuid.uuid4().hex[:8]}"
+
     try:
-        while True:
-            data = await websocket.receive_text()
-            print(f"Received message: {data}")
-            await websocket.send_text(f"Echo: {data}")
-    except WebSocketDisconnect:
-        print("Client disconnected")
+        await ws_manager.connect(websocket, session_id)
+        loop = asyncio.get_event_loop()
 
-# ---------- 🔴 Realtime Streaming with AssemblyAI ----------
-@app.websocket("/ws-audio")
-async def websocket_audio_endpoint(websocket: WebSocket):
-    """
-    Expect: raw PCM Int16 mono 16 kHz chunks from the browser.
-    Sends back Partial/Final transcripts as text frames.
-    Also logs transcripts to server console for the Day-17 screenshot.
-    """
-    await websocket.accept()
-    loop = asyncio.get_running_loop()
-    transcript_queue: asyncio.Queue[tuple[str, str]] = asyncio.Queue()
+        async def handle_transcript(text: str):
+            """Handle transcript processing."""
+            try:
+                session = ws_manager.get_session(session_id)
+                chat_history = session.get("chat_history", [])
+                api_keys = session.get("api_keys", {})
 
-    # Callback from AssemblyAI SDK (may be called from another thread)
-    def on_data(transcript: aai.RealtimeTranscript):
-        if not getattr(transcript, "text", None):
-            return
-        kind = "Final" if isinstance(transcript, aai.RealtimeFinalTranscript) else "Partial"
-        # push to async queue thread-safely
-        asyncio.run_coroutine_threadsafe(transcript_queue.put((kind, transcript.text)), loop)
-        # also log on server for screenshot
-        if kind == "Final":
-            print("✅ Final:", transcript.text)
-        else:
-            print("📝 Partial:", transcript.text)
+                # Validate API keys
+                required_keys = ["gemini", "assembly", "murf"]
+                missing_keys = [key for key in required_keys if not api_keys.get(key)]
 
-    def on_error(err: Exception):
-        print("❌ AssemblyAI Error:", err)
+                if missing_keys:
+                    await ws_manager.send_message(session_id, {
+                        "type": "error",
+                        "text": f"Please configure these API keys: {', '.join(missing_keys)}"
+                    })
+                    return
 
-    # Use the new Universal streaming model to avoid deprecation warnings
-    rt = aai.RealtimeTranscriber(
-    sample_rate=16000,
-    on_data=on_data,
-    on_error=on_error,
-    model="universal",   # ✅ ab yeh chalega
-)
-    try:
-        rt.connect()
+                # Send final transcript
+                await ws_manager.send_message(session_id, {
+                    "type": "final",
+                    "text": text
+                })
 
-        async def pump_transcripts():
-            # forward transcripts to the browser
-            while True:
-                kind, text = await transcript_queue.get()
+                # Get LLM response
                 try:
-                    await websocket.send_text(f"{kind}: {text}")
-                except Exception:
-                    break
+                    # Use the original agent_response function with API keys
+                    full_response, updated_history = await get_agent_response(
+                        text, chat_history, api_keys
+                    )
 
-        pump_task = asyncio.create_task(pump_transcripts())
+                    # Update chat history
+                    ws_manager.update_session(session_id, {"chat_history": updated_history})
 
+                    # Send assistant response
+                    await ws_manager.send_message(session_id, {
+                        "type": "assistant",
+                        "text": full_response
+                    })
+
+                    # Generate TTS
+                    await process_tts(session_id, full_response, session.get("settings", {}), api_keys)
+
+                except Exception as e:
+                    logger.error(f"Error in agent response: {e}")
+                    await ws_manager.send_message(session_id, {
+                        "type": "error",
+                        "text": "Sorry, I encountered an error processing your request."
+                    })
+
+            except Exception as e:
+                logger.error(f"Error in transcript handler: {e}")
+                await ws_manager.send_message(session_id, {
+                    "type": "error",
+                    "text": "Sorry, an error occurred while processing your request."
+                })
+
+        def on_final_transcript(text: str):
+            """Callback for final transcript."""
+            logger.info(f"Final transcript for {session_id}: {text}")
+            asyncio.run_coroutine_threadsafe(handle_transcript(text), loop)
+
+        # Main message loop
         while True:
-            audio_bytes = await websocket.receive_bytes()  # raw PCM Int16LE bytes
-            rt.stream(audio_bytes)
+            try:
+                message = await websocket.receive()
 
-    except WebSocketDisconnect:
-        print("🔌 Client disconnected from /ws-audio")
-    except Exception as e:
-        print(f"WebSocket error: {e}")
+                if "bytes" in message:  # Audio data
+                    session = ws_manager.get_session(session_id)
+                    transcriber = session.get("transcriber")
+
+                    if transcriber:
+                        try:
+                            if inspect.iscoroutinefunction(transcriber.stream_audio):
+                                await transcriber.stream_audio(message["bytes"])
+                            else:
+                                transcriber.stream_audio(message["bytes"])
+                        except Exception as e:
+                            logger.error(f"Transcriber error: {e}")
+
+                elif "text" in message:  # Control messages
+                    try:
+                        data = json.loads(message["text"])
+                        await handle_control_message(session_id, data, on_final_transcript)
+                    except json.JSONDecodeError:
+                        await ws_manager.send_message(session_id, {
+                            "type": "ack",
+                            "text": "Message received"
+                        })
+
+            except WebSocketDisconnect:
+                logger.info(f"WebSocket {session_id} disconnected by client")
+                break
+            except Exception as e:
+                logger.error(f"WebSocket error for {session_id}: {e}")
+                break
+
     finally:
-        try:
-            rt.close()
-        except Exception:
-            pass
-        # cancel pump task if running
-        for task in asyncio.all_tasks():
-            if task is not asyncio.current_task():
-                task.cancel()
-        print("🛑 Audio stream ended")
+        await ws_manager.disconnect(session_id)
 
+
+async def handle_control_message(session_id: str, data: dict, transcript_callback):
+    """Handle control messages like configuration updates."""
+    message_type = data.get("type")
+
+    if message_type == "config":
+        # Update API keys and settings
+        api_keys = data.get("apiKeys", {})
+        settings = data.get("settings", {})
+
+        ws_manager.update_session(session_id, {
+            "api_keys": api_keys,
+            "settings": settings
+        })
+
+        # Initialize transcriber with new API key
+        if api_keys.get("assembly"):
+            try:
+                # Create transcriber with dynamic API key
+                transcriber = stt.AssemblyAIStreamingTranscriber(
+                    api_key=api_keys["assembly"],
+                    on_final_callback=transcript_callback
+                )
+
+                ws_manager.update_session(session_id, {"transcriber": transcriber})
+
+                await ws_manager.send_message(session_id, {
+                    "type": "status",
+                    "text": "Configuration updated successfully! 🎉",
+                    "level": "success"
+                })
+            except Exception as e:
+                logger.error(f"Failed to initialize transcriber: {e}")
+                await ws_manager.send_message(session_id, {
+                    "type": "error",
+                    "text": "Failed to initialize speech recognition. Please check your AssemblyAI API key."
+                })
+
+
+async def get_agent_response(query: str, history: list, api_keys: dict):
+    """Get agent response with API key support."""
+    try:
+        # Simple search trigger check
+        search_triggers = ["latest", "today", "current", "news", "price", "weather"]
+        needs_search = any(trigger in query.lower() for trigger in search_triggers)
+
+        if needs_search and api_keys.get("serpapi"):
+            # Use search (simplified)
+            from app.services.search import web_search
+            search_result = web_search(query)
+            enhanced_query = f"Based on this information: {search_result}\n\nAnswer: {query}"
+            response, updated_history = llm.get_llm_response(enhanced_query, history)
+        else:
+            # Use LLM directly
+            response, updated_history = llm.get_llm_response(query, history)
+
+        return response, updated_history
+
+    except Exception as e:
+        logger.error(f"Error in agent response: {e}")
+        return "I apologize, but I encountered an error. Please check your API configuration.", history
+
+
+async def process_tts(session_id: str, text: str, settings: dict, api_keys: dict):
+    """Process text-to-speech."""
+    try:
+        # Split into sentences
+        sentences = re.split(r'(?<=[.?!])\s+', text.strip())
+
+        for sentence in sentences:
+            if sentence.strip():
+                # Generate audio
+                loop = asyncio.get_event_loop()
+                audio_bytes = await loop.run_in_executor(
+                    None,
+                    tts.speak,
+                    sentence.strip(),
+                    settings.get("voice", "en-US-natalie"),  # ✅ valid voiceId
+                    "mp3"
+                )
+
+                if audio_bytes:
+                    b64_audio = base64.b64encode(audio_bytes).decode("utf-8")
+                    await ws_manager.send_message(session_id, {
+                        "type": "audio",
+                        "b64": b64_audio
+                    })
+
+    except Exception as e:
+        logger.error(f"TTS processing error: {e}")
+        await ws_manager.send_message(session_id, {
+            "type": "error",
+            "text": "Audio generation failed"
+        })
+
+
+@app.on_event("startup")
+async def startup_event():
+    """Application startup event."""
+    logger.info("🚀 AI Voice Agent Pro started successfully!")
+
+
+@app.on_event("shutdown")
+async def shutdown_event():
+    """Application shutdown event."""
+    logger.info("🛑 AI Voice Agent Pro shutting down...")
+
+    # Close all WebSocket connections
+    for session_id in list(ws_manager.connections.keys()):
+        await ws_manager.disconnect(session_id)
+
+
+if __name__ == "__main__":
+    import uvicorn
+
+    uvicorn.run(
+        "main:app",
+        host="0.0.0.0",
+        port=8000,
+        reload=True,
+        log_level="info"
+    )
